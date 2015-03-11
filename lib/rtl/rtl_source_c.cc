@@ -88,7 +88,8 @@ rtl_source_c::rtl_source_c (const std::string &args)
     _no_tuner(false),
     _auto_gain(false),
     _if_gain(0),
-    _skipped(0)
+    _skipped(0),
+    _bandwidth(0)
 {
   int ret;
   int index;
@@ -704,4 +705,16 @@ std::string rtl_source_c::set_antenna( const std::string & antenna, size_t chan 
 std::string rtl_source_c::get_antenna( size_t chan )
 {
   return "RX";
+}
+
+double rtl_source_c::get_bandwidth( size_t chan )
+{
+  return _bandwidth;
+}
+
+double rtl_source_c::set_bandwidth( double bandwidth, size_t chan )
+{
+  rtlsdr_set_tuner_bandwidth( _dev, bandwidth );
+  _bandwidth = bandwidth;
+  return bandwidth;
 }
