@@ -705,3 +705,14 @@ std::string rtl_source_c::get_antenna( size_t chan )
 {
   return "RX";
 }
+
+double rtl_source_c::get_bandwidth( size_t chan )
+{
+  return rtlsdr_get_tuner_bandwidth( _dev );
+}
+
+double rtl_source_c::set_bandwidth( double bandwidth, size_t chan )
+{
+  rtlsdr_set_tuner_bandwidth( _dev, bandwidth );
+  return rtlsdr_get_tuner_bandwidth( _dev );
+}
