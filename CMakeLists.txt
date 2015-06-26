@@ -150,7 +150,10 @@ set(GRC_BLOCKS_DIR      ${GR_PKG_DATA_DIR}/grc/blocks)
 # Find build dependencies
 ########################################################################
 set(GR_REQUIRED_COMPONENTS RUNTIME PMT BLOCKS)
-find_package(Gnuradio 3.7.3 REQUIRED)
+find_package(Gnuradio 3.7.3 QUIET)
+if(NOT Gnuradio_FOUND)
+    find_package(Gnuradio 3.8 REQUIRED)
+endif()
 find_package(GnuradioIQBalance)
 find_package(UHD)
 find_package(GnuradioUHD)
