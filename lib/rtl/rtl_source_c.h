@@ -27,6 +27,7 @@
 #include <gnuradio/thread/thread.h>
 #include <boost/thread/mutex.hpp>
 #include <boost/thread/condition_variable.hpp>
+#include <boost/atomic.hpp>
 
 #include "source_iface.h"
 
@@ -121,6 +122,7 @@ private:
   void rtlsdr_callback(unsigned char *buf, uint32_t len);
   static void _rtlsdr_wait(rtl_source_c *obj);
   void rtlsdr_wait();
+  void sw_agc(const unsigned char *buf, uint32_t len);
 
   std::vector<gr_complex> _lut;
 
@@ -134,6 +136,14 @@ private:
   boost::mutex _buf_mutex;
   boost::condition_variable _buf_cond;
   bool _running;
+
+  boost::atomic<bool> _agc_perform;
+  boost::atomic<uint32_t> _agc_delay;
+  float _agc_gain;
+  osmosdr::range_t _gain_limits;
+  int _agc_high;
+  int _agc_medium;
+  int _agc_nsamples;
 
   unsigned int _buf_offset;
   int _samp_avail;

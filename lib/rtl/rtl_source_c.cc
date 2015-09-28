@@ -75,6 +75,8 @@ static const int MAX_IN = 0;	// maximum number of input streams
 static const int MIN_OUT = 1;	// minimum number of output streams
 static const int MAX_OUT = 1;	// maximum number of output streams
 
+static const float AGC_PERIOD = 0.5;    // AGC sampling period, relative to sample rate
+
 /*
  * The private constructor
  */
@@ -85,6 +87,12 @@ rtl_source_c::rtl_source_c (const std::string &args)
     _dev(NULL),
     _buf(NULL),
     _running(false),
+    _agc_perform(false),
+    _agc_delay(0),
+    _agc_gain(24),
+    _agc_high(0),
+    _agc_medium(0),
+    _agc_nsamples(0),
     _no_tuner(false),
     _auto_gain(false),
     _if_gain(0),
@@ -236,6 +244,9 @@ rtl_source_c::rtl_source_c (const std::string &args)
     for(unsigned int i = 0; i < _buf_num; ++i)
       _buf[i] = (unsigned short *) malloc(_buf_len);
   }
+
+  osmosdr::gain_range_t gain_range = rtl_source_c::get_gain_range( 0 );
+  _gain_limits = osmosdr::range_t(gain_range.start(), gain_range.stop());
 }
 
 /*
@@ -290,6 +301,56 @@ void rtl_source_c::_rtlsdr_callback(unsigned char *buf, uint32_t len, void *ctx)
   obj->rtlsdr_callback(buf, len);
 }
 
+void rtl_source_c::sw_agc(const unsigned char *buf, uint32_t len)
+{
+  // check if last AGC action was performed, if not, wait
+  if (_agc_perform) {
+    return;
+  }
+
+  if (_agc_delay > len) {
+    _agc_delay -= len;
+    return;
+  }
+
+  _agc_nsamples += len - _agc_delay;
+
+  const int AGC_SPAN = 90; // 127 * (1 / sqrt(2))
+  for (uint32_t i = _agc_delay; i < len; ++i) {
+    const uint8_t val = buf[i];
+    if (val == 0 || val == UCHAR_MAX) {
+      ++_agc_high;
+      continue;
+    }
+    if (val > (UCHAR_MAX - AGC_SPAN) || val < AGC_SPAN) {
+      ++_agc_medium;
+      continue;
+    }
+  }
+  _agc_delay = 0;
+
+  if (_agc_nsamples >= 2*get_sample_rate() * AGC_PERIOD) {
+    fprintf(stderr, "_agc_medium=%d _agc_high=%d\n",
+            _agc_medium, _agc_high);
+    if (_agc_medium < (2*get_sample_rate() * AGC_PERIOD * 0.5)) {
+      if (_agc_gain < _gain_limits.stop()) {
+        _agc_gain += 2;
+        _agc_perform = true;
+      }
+    } else
+    if (_agc_high > (2*get_sample_rate() * AGC_PERIOD * 0.0001)) {
+      fprintf(stderr, "AAAAAA\n");
+      if (_agc_gain > _gain_limits.start()) {
+        _agc_gain -= 2;
+        _agc_perform = true;
+      }
+    }
+    _agc_nsamples = 0;
+    _agc_medium = 0;
+    _agc_high = 0;
+  }
+}
+
 void rtl_source_c::rtlsdr_callback(unsigned char *buf, uint32_t len)
 {
   if (_skipped < BUF_SKIP) {
@@ -310,6 +371,7 @@ void rtl_source_c::rtlsdr_callback(unsigned char *buf, uint32_t len)
       _buf_used++;
     }
   }
+  sw_agc(buf, len);
 
   _buf_cond.notify_one();
 }
@@ -340,8 +402,20 @@ int rtl_source_c::work( int noutput_items,
   {
     boost::mutex::scoped_lock lock( _buf_mutex );
 
-    while (_buf_used < 3 && _running) // collect at least 3 buffers
+    while (_running) { // collect at least 3 buffers
+
+      if (_agc_perform) {
+        set_gain(_agc_gain, 0);
+        fprintf(stderr, "AGC %f\n", _agc_gain);
+        _agc_delay = get_sample_rate() / 2;
+        _agc_perform = false;
+      }
+
+      if (_buf_used >= 3) {
+        break;
+      }
       _buf_cond.wait( lock );
+    }
   }
 
   if (!_running)
