@@ -118,7 +118,7 @@ protected:
 
 private:
   static int _rtlsdr_callback(unsigned char *buf, uint32_t len, void *ctx);
-  void rtlsdr_callback(unsigned char *buf, uint32_t len);
+  int rtlsdr_callback(unsigned char *buf, uint32_t len);
   static void _rtlsdr_wait(rtl_source_c *obj);
   void rtlsdr_wait();
 
@@ -126,11 +126,11 @@ private:
 
   rtlsdr_dev_t *_dev;
   gr::thread::thread _thread;
-  unsigned short **_buf;
   unsigned int _buf_num;
   unsigned int _buf_len;
-  unsigned int _buf_head;
-  unsigned int _buf_used;
+  unsigned short **_bufs;
+  unsigned int _buf_head_;
+  unsigned int _buf_tail_;
   boost::mutex _buf_mutex;
   boost::condition_variable _buf_cond;
   bool _running;

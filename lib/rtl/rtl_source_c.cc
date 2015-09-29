@@ -83,7 +83,7 @@ rtl_source_c::rtl_source_c (const std::string &args)
         gr::io_signature::make(MIN_IN, MAX_IN, sizeof (gr_complex)),
         gr::io_signature::make(MIN_OUT, MAX_OUT, sizeof (gr_complex))),
     _dev(NULL),
-    _buf(NULL),
+    _bufs(NULL),
     _running(false),
     _no_tuner(false),
     _auto_gain(false),
@@ -150,7 +150,8 @@ rtl_source_c::rtl_source_c (const std::string &args)
   if (dict.count("offset_tune"))
     offset_tune = boost::lexical_cast< unsigned int >( dict["offset_tune"] );
 
-  _buf_num = _buf_len = _buf_head = _buf_used = _buf_offset = 0;
+  _buf_num = _buf_len = _buf_offset = 0;
+  _buf_head_ = _buf_tail_ = 0;
 
   if (dict.count("buffers"))
     _buf_num = boost::lexical_cast< unsigned int >( dict["buffers"] );
@@ -230,12 +231,9 @@ rtl_source_c::rtl_source_c (const std::string &args)
 
   set_if_gain( 24 ); /* preset to a reasonable default (non-GRC use case) */
 
-  _buf = (unsigned short **) malloc(_buf_num * sizeof(unsigned short *));
-
-  if (_buf) {
-    for(unsigned int i = 0; i < _buf_num; ++i)
-      _buf[i] = (unsigned short *) malloc(_buf_len);
-  }
+  _bufs = (unsigned short **) malloc(_buf_num * sizeof(unsigned short *));
+  if (!_bufs)
+      throw std::runtime_error("OOM");
 }
 
 /*
@@ -255,15 +253,7 @@ rtl_source_c::~rtl_source_c ()
     _dev = NULL;
   }
 
-  if (_buf) {
-    for(unsigned int i = 0; i < _buf_num; ++i) {
-      if (_buf[i])
-        free(_buf[i]);
-    }
-
-    free(_buf);
-    _buf = NULL;
-  }
+  free(_bufs);
 }
 
 bool rtl_source_c::start()
@@ -287,32 +277,30 @@ bool rtl_source_c::stop()
 int rtl_source_c::_rtlsdr_callback(unsigned char *buf, uint32_t len, void *ctx)
 {
   rtl_source_c *obj = (rtl_source_c *)ctx;
-  obj->rtlsdr_callback(buf, len);
-  return 0;
+  return obj->rtlsdr_callback(buf, len);
 }
 
-void rtl_source_c::rtlsdr_callback(unsigned char *buf, uint32_t len)
+int rtl_source_c::rtlsdr_callback(unsigned char *buf, uint32_t len)
 {
   if (_skipped < BUF_SKIP) {
     _skipped++;
-    return;
+    return 0;
   }
 
   {
     boost::mutex::scoped_lock lock( _buf_mutex );
 
-    int buf_tail = (_buf_head + _buf_used) % _buf_num;
-    memcpy(_buf[buf_tail], buf, len);
-
-    if (_buf_used == _buf_num) {
+    if ((_buf_tail_ + 1) % _buf_num == _buf_head_) {
       std::cerr << "O" << std::flush;
-      _buf_head = (_buf_head + 1) % _buf_num;
-    } else {
-      _buf_used++;
+      rtlsdr_read_confirm(_dev, (unsigned char *)_bufs[_buf_tail_]);
+      _buf_tail_ = (_buf_tail_ + 1) % _buf_num;
     }
+    _bufs[_buf_head_] = (unsigned short *)buf;
+    _buf_head_ = (_buf_head_ + 1) % _buf_num;
   }
 
   _buf_cond.notify_one();
+  return 1;
 }
 
 void rtl_source_c::_rtlsdr_wait(rtl_source_c *obj)
@@ -341,16 +329,16 @@ int rtl_source_c::work( int noutput_items,
   {
     boost::mutex::scoped_lock lock( _buf_mutex );
 
-    while (_buf_used < 3 && _running) // collect at least 3 buffers
+    while (_buf_head_ == _buf_tail_ && _running) // collect at least 3 buffers
       _buf_cond.wait( lock );
   }
 
   if (!_running)
     return WORK_DONE;
 
-  while (noutput_items && _buf_used) {
+  while (noutput_items && _buf_head_ != _buf_tail_) {
     const int nout = std::min(noutput_items, _samp_avail);
-    const unsigned short *buf = _buf[_buf_head] + _buf_offset;
+    const unsigned short *buf = _bufs[_buf_tail_] + _buf_offset;
 
     for (int i = 0; i < nout; ++i)
       *out++ = _lut[ *(buf + i) ];
@@ -362,8 +350,8 @@ int rtl_source_c::work( int noutput_items,
       {
         boost::mutex::scoped_lock lock( _buf_mutex );
 
-        _buf_head = (_buf_head + 1) % _buf_num;
-        _buf_used--;
+        rtlsdr_read_confirm(_dev, (unsigned char *)_bufs[_buf_tail_]);
+        _buf_tail_ = (_buf_tail_ + 1) % _buf_num;
       }
       _samp_avail = _buf_len / BYTES_PER_SAMPLE;
       _buf_offset = 0;
