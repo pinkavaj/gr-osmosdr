@@ -284,10 +284,11 @@ bool rtl_source_c::stop()
   return true;
 }
 
-void rtl_source_c::_rtlsdr_callback(unsigned char *buf, uint32_t len, void *ctx)
+int rtl_source_c::_rtlsdr_callback(unsigned char *buf, uint32_t len, void *ctx)
 {
   rtl_source_c *obj = (rtl_source_c *)ctx;
   obj->rtlsdr_callback(buf, len);
+  return 0;
 }
 
 void rtl_source_c::rtlsdr_callback(unsigned char *buf, uint32_t len)
