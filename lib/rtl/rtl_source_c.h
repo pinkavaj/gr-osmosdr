@@ -117,7 +117,7 @@ protected:
   bool stop();
 
 private:
-  static void _rtlsdr_callback(unsigned char *buf, uint32_t len, void *ctx);
+  static int _rtlsdr_callback(unsigned char *buf, uint32_t len, void *ctx);
   void rtlsdr_callback(unsigned char *buf, uint32_t len);
   static void _rtlsdr_wait(rtl_source_c *obj);
   void rtlsdr_wait();
