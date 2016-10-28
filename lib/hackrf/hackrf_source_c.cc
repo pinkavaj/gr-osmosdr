@@ -355,15 +355,13 @@ int hackrf_source_c::work( int noutput_items,
 
   unsigned short *buf = _buf[_buf_head] + _buf_offset;
 
-  if (noutput_items <= _samp_avail) {
-    for (int i = 0; i < noutput_items; ++i)
-      *out++ = _lut[ *(buf + i) ];
-
-    _buf_offset += noutput_items;
-    _samp_avail -= noutput_items;
-  } else {
+  int nout_offs = 0;
+  // copy whole buffer(s)
+  while ((noutput_items - nout_offs) >= _samp_avail && _buf_used) {
     for (int i = 0; i < _samp_avail; ++i)
       *out++ = _lut[ *(buf + i) ];
+
+    nout_offs += _samp_avail;
 
     {
       boost::mutex::scoped_lock lock( _buf_mutex );
@@ -371,19 +369,26 @@ int hackrf_source_c::work( int noutput_items,
       _buf_head = (_buf_head + 1) % _buf_num;
       _buf_used--;
     }
-
     buf = _buf[_buf_head];
 
-    int remaining = noutput_items - _samp_avail;
+    _buf_offset = 0;
+    _samp_avail = _buf_len / BYTES_PER_SAMPLE;
+  }
+
+  // copy remaining data
+  if (nout_offs < _samp_avail) {
+    int remaining = noutput_items < _samp_avail ? noutput_items : _samp_avail;
 
     for (int i = 0; i < remaining; ++i)
       *out++ = _lut[ *(buf + i) ];
 
-    _buf_offset = remaining;
-    _samp_avail = (_buf_len / BYTES_PER_SAMPLE) - remaining;
+    nout_offs += remaining;
+
+    _buf_offset += remaining;
+    _samp_avail -= remain;
   }
 
-  return noutput_items;
+  return nout_offs;
 }
 
 std::vector<std::string> hackrf_source_c::get_devices()
